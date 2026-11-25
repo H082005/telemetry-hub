@@ -50,7 +50,7 @@
       </div>
       <table>
         <thead>
-          <tr><th>Comparar</th><th>Piloto</th><th>Plataforma</th><th>Vehículo</th><th>Tiempo</th></tr>
+          <tr><th>Comparar</th><th>Piloto</th><th>Plataforma</th><th>Vehículo</th><th>Tiempo</th><th>Estado</th></tr>
         </thead>
         <tbody id="leaderboardBody"></tbody>
       </table>
@@ -124,6 +124,7 @@ async function loadLeaderboard() {
       <td style="color:#9ca3af;">${l.plataforma}</td>
       <td>${l.vehiculo}</td>
       <td class="mono">${formatMs(l.tiempo_total_ms)}</td>
+      <td>${l.valida ? '<span style="color:#10b981; font-weight:600;">(Vuelta Válida)</span>' : '<span style="color:#ef4444; font-weight:600;">(Vuelta Inválida)</span>'}</td>
     </tr>
   `).join('');
   runComparison();
