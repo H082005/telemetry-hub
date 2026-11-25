@@ -100,10 +100,11 @@ def ask_race_engineer_multi(ref_lap: dict, target_lap: dict, delta: np.ndarray, 
             })
 
     if not api_key:
-        zona = loss_zones.__getitem__(0)["pct_circuito"] if loss_zones else 0
-        vel_diff = round(loss_zones.__getitem__(0)["vel_referencia_kmh"] - loss_zones.__getitem__(0)["vel_piloto_kmh"], 1) if loss_zones else 0
+        first_zone = next(iter(loss_zones), None)
+        zona = first_zone["pct_circuito"] if first_zone else 0
+        vel_diff = round(first_zone["vel_referencia_kmh"] - first_zone["vel_piloto_kmh"], 1) if first_zone else 0
         return (
-            f"📻 [Radio Simulada] {target_lap['usuario']} cede {delta[-1]:+.3f}s frente a {ref_lap['usuario']}.\n"
+            f"📻 [Radio Simulada - Añade GEMINI_API_KEY en Render] {target_lap['usuario']} cede {delta[-1]:+.3f}s frente a {ref_lap['usuario']}.\n"
             f"• Punto crítico al {zona}% del trazado: diferencia de {vel_diff} km/h en paso por curva.\n"
             f"• Consejo: retrasa ligeramente la frenada y abre la trazada antes de girar para ganar velocidad de salida."
         )
@@ -113,14 +114,13 @@ def ask_race_engineer_multi(ref_lap: dict, target_lap: dict, delta: np.ndarray, 
     Eres un ingeniero de pista de motorsport. Compara la vuelta de {target_lap['usuario']} contra la referencia de {ref_lap['usuario']} en {target_lap['juego']} ({target_lap['circuito']} - {target_lap['vehiculo']}).
     Diferencia total: {delta[-1]:+.3f} segundos.
     Zonas donde más tiempo pierde {target_lap['usuario']}: {loss_zones}.
-    Dame 3 consejos directos y fáciles de entender para un principiante (máximo 120 palabras, estilo radio de boxes).
+    Dame 3 consejos directos y fáciles de entender (máximo 120 palabras, estilo radio de boxes).
     """
     try:
         response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         return response.text
     except Exception as e:
         return f"Radio no disponible: {str(e)}"
-
 @app.get("/")
 def serve_frontend():
     return FileResponse("index.html")
@@ -151,29 +151,40 @@ def upload_lap(payload: LapPayload):
 def get_filters():
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT DISTINCT juego, circuito FROM laps ORDER BY juego, circuito;")
+    cur.execute("SELECT DISTINCT juego, circuito, vehiculo FROM laps ORDER BY juego, circuito, vehiculo;")
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    juegos = sorted(list({r["juego"] for r in rows}))
-    circuitos_por_juego = {j: [] for j in juegos}
+    tree = {}
     for r in rows:
-        circuitos_por_juego[r["juego"]].append(r["circuito"])
-    return {"juegos": juegos, "circuitos_por_juego": circuitos_por_juego}
+        j, c, v = r["juego"], r["circuito"], r["vehiculo"]
+        tree.setdefault(j, {}).setdefault(c, []).append(v)
+    return {"tree": tree}
 
 @app.get("/api/leaderboard")
-def get_leaderboard(juego: Optional[str] = None, circuito: Optional[str] = None):
+def get_leaderboard(juego: Optional[str] = None, circuito: Optional[str] = None, vehiculo: Optional[str] = None):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, usuario, plataforma, juego, circuito, vehiculo, tiempo_total_ms, COALESCE(valida, TRUE) as valida
-        FROM laps
-        WHERE LOWER(juego) = LOWER(%s) AND LOWER(circuito) = LOWER(%s)
-        ORDER BY tiempo_total_ms ASC;
-        """,
-        (juego or "", circuito or "")
-    )
+    if vehiculo and vehiculo != "TODOS":
+        cur.execute(
+            """
+            SELECT id, usuario, plataforma, juego, circuito, vehiculo, tiempo_total_ms, COALESCE(valida, TRUE) as valida
+            FROM laps
+            WHERE LOWER(juego) = LOWER(%s) AND LOWER(circuito) = LOWER(%s) AND LOWER(vehiculo) = LOWER(%s)
+            ORDER BY tiempo_total_ms ASC;
+            """,
+            (juego or "", circuito or "", vehiculo)
+        )
+    else:
+        cur.execute(
+            """
+            SELECT id, usuario, plataforma, juego, circuito, vehiculo, tiempo_total_ms, COALESCE(valida, TRUE) as valida
+            FROM laps
+            WHERE LOWER(juego) = LOWER(%s) AND LOWER(circuito) = LOWER(%s)
+            ORDER BY tiempo_total_ms ASC;
+            """,
+            (juego or "", circuito or "")
+        )
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -192,8 +203,7 @@ def compare_laps(ids: List[int] = Query(...)):
         raise HTTPException(status_code=404, detail="No se encontraron vueltas")
 
     selected.sort(key=lambda l: ids.index(l["id"]))
-    ref_lap = selected.__getitem__(0)
-
+    ref_lap = next(iter(selected))
     grid = np.linspace(0.0, 1.0, 500)
     ref_interp = interpolate_lap(ref_lap, grid)
 
@@ -205,7 +215,6 @@ def compare_laps(ids: List[int] = Query(...)):
         interp = interpolate_lap(lap, grid)
         delta = interp["time_s"] - ref_interp["time_s"]
         delta_rate = np.gradient(delta)
-
         if i == 1:
             engineer_advice = ask_race_engineer_multi(ref_lap, lap, delta, delta_rate, ref_interp, interp, grid)
 
@@ -230,8 +239,4 @@ def compare_laps(ids: List[int] = Query(...)):
     if len(selected) == 1:
         engineer_advice = f"Mostrando vuelta base de {ref_lap['usuario']}. Marca otra vuelta en la tabla para comparar trazadas y activar al Ingeniero IA."
 
-    return {
-        "grid": np.round(grid * 100, 2).tolist(),
-        "series": series,
-        "ai_engineer": engineer_advice
-    }
+    return {"grid": np.round(grid * 100, 2).tolist(), "series": series, "ai_engineer": engineer_advice}
