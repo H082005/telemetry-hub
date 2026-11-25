@@ -187,12 +187,12 @@ function drawTrackMap() {
   const minZ = Math.min(...allZ), maxZ = Math.max(...allZ);
   const pad = 40;
   const scale = Math.min((canvas.width - pad * 2) / (maxX - minX || 1), (canvas.height - pad * 2) / (maxZ - minZ || 1));
-  const toCanvas = (x, z) => [pad + (x - minX) * scale, pad + (z - minZ) * scale];
+  const toCanvas = (x, z) => Array(pad + (x - minX) * scale, pad + (z - minZ) * scale);
 
   ctx.beginPath();
   base.x.forEach((x, i) => {
-    const [cx, cy] = toCanvas(x, base.z.at(i));
-    i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
+    const pt = toCanvas(x, base.z.at(i));
+    i === 0 ? ctx.moveTo(pt.at(0), pt.at(1)) : ctx.lineTo(pt.at(0), pt.at(1));
   });
   ctx.strokeStyle = '#1e293b';
   ctx.lineWidth = 10;
@@ -203,28 +203,28 @@ function drawTrackMap() {
   if (mapMode === 'delta' && currentSeries.length >= 2) {
     const t = currentSeries.at(1);
     for (let i = 0; i < t.x.length - 1; i++) {
-      const [x1, y1] = toCanvas(t.x.at(i), t.z.at(i));
-      const [x2, y2] = toCanvas(t.x.at(i + 1), t.z.at(i + 1));
-      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      const p1 = toCanvas(t.x.at(i), t.z.at(i));
+      const p2 = toCanvas(t.x.at(i + 1), t.z.at(i + 1));
+      ctx.beginPath(); ctx.moveTo(p1.at(0), p1.at(1)); ctx.lineTo(p2.at(0), p2.at(1));
       ctx.strokeStyle = t.delta_rate.at(i) <= 0 ? '#10b981' : '#ef4444';
       ctx.lineWidth = 5; ctx.stroke();
     }
   } else {
     currentSeries.forEach(s => {
       ctx.beginPath();
-      s.x.forEach((x, i) => { const [cx, cy] = toCanvas(x, s.z.at(i)); i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy); });
+      s.x.forEach((x, i) => { const pt = toCanvas(x, s.z.at(i)); i === 0 ? ctx.moveTo(pt.at(0), pt.at(1)) : ctx.lineTo(pt.at(0), pt.at(1)); });
       ctx.strokeStyle = s.color; ctx.lineWidth = 3; ctx.stroke();
     });
   }
 
-  const [sx, sy] = toCanvas(base.x.at(0), base.z.at(0));
+  const startPt = toCanvas(base.x.at(0), base.z.at(0));
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(sx - 5, sy - 5, 10, 10);
+  ctx.fillRect(startPt.at(0) - 5, startPt.at(1) - 5, 10, 10);
 
   if (hoverIdx !== null) {
     currentSeries.forEach(s => {
-      const [cx, cy] = toCanvas(s.x.at(hoverIdx), s.z.at(hoverIdx));
-      ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      const pt = toCanvas(s.x.at(hoverIdx), s.z.at(hoverIdx));
+      ctx.beginPath(); ctx.arc(pt.at(0), pt.at(1), 6, 0, Math.PI * 2);
       ctx.fillStyle = s.color; ctx.fill();
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
     });
@@ -242,13 +242,13 @@ function drawLineChart(canvasId, title, getter, isPedals) {
   const padL = 48, padR = 16, padT = 26, padB = 18;
   const w = canvas.width - padL - padR, h = canvas.height - padT - padB;
 
-  let vals = isPedals ? [0, 1] : currentSeries.flatMap(getter);
+  let vals = isPedals ? Array(0, 1) : currentSeries.flatMap(getter);
   let minV = Math.min(...vals), maxV = Math.max(...vals);
   if (minV === maxV) { minV -= 1; maxV += 1; }
 
   ctx.fillStyle = '#9ca3af'; ctx.font = '12px Segoe UI'; ctx.fillText(title, padL, 16);
   ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 1;
-  [0, 0.5, 1].forEach(f => {
+  Array(0, 0.5, 1).forEach(f => {
     const y = padT + h * f;
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + w, y); ctx.stroke();
     const valLabel = (maxV - (maxV - minV) * f).toFixed(isPedals ? 1 : 2);
@@ -257,14 +257,14 @@ function drawLineChart(canvasId, title, getter, isPedals) {
 
   const plotLine = (arr, color, dashed) => {
     ctx.beginPath();
-    ctx.setLineDash(dashed ? [6, 4] : []);
+    ctx.setLineDash(dashed ? Array(6, 4) : Array());
     arr.forEach((v, i) => {
       const x = padL + (i / (arr.length - 1)) * w;
       const y = padT + h - ((v - minV) / (maxV - minV)) * h;
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.setLineDash(Array());
   };
 
   currentSeries.forEach(s => {
