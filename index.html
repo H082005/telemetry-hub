@@ -37,9 +37,10 @@
         <h1>🏎️ Telemetry Hub <span class="badge">AI RACE ENGINEER</span></h1>
         <p class="subtitle">Plataforma de análisis de telemetría multi-piloto</p>
       </div>
-      <div style="display:flex; gap:10px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <select id="selectJuego"></select>
         <select id="selectCircuito"></select>
+        <select id="selectVehiculo"></select>
       </div>
     </div>
 
@@ -85,7 +86,7 @@
     </div>
   </div>
 <script>
-let filtersData = {}, currentSeries = [], currentGrid = [], mapMode = 'delta', hoverIdx = null;
+let filterTree = {}, currentSeries = [], currentGrid = [], mapMode = 'delta', hoverIdx = null;
 
 function formatMs(ms) {
   const m = Math.floor(ms / 60000);
@@ -95,9 +96,11 @@ function formatMs(ms) {
 
 async function init() {
   const res = await fetch('/api/filters');
-  filtersData = await res.json();
+  const data = await res.json();
+  filterTree = data.tree || {};
   const selJuego = document.getElementById('selectJuego');
-  selJuego.innerHTML = filtersData.juegos.map(j => `<option value="${j}">${j}</option>`).join('');
+  const juegos = Object.keys(filterTree);
+  selJuego.innerHTML = juegos.map(j => `<option value="${j}">${j}</option>`).join('');
   selJuego.onchange = updateCircuitos;
   updateCircuitos();
 }
@@ -105,17 +108,28 @@ async function init() {
 function updateCircuitos() {
   const juego = document.getElementById('selectJuego').value;
   const selCirc = document.getElementById('selectCircuito');
-  const circs = filtersData.circuitos_por_juego[juego] || [];
+  const circs = Object.keys(filterTree[juego] || {});
   selCirc.innerHTML = circs.map(c => `<option value="${c}">${c}</option>`).join('');
-  selCirc.onchange = loadLeaderboard;
+  selCirc.onchange = updateVehiculos;
+  updateVehiculos();
+}
+
+function updateVehiculos() {
+  const juego = document.getElementById('selectJuego').value;
+  const circuito = document.getElementById('selectCircuito').value;
+  const selVeh = document.getElementById('selectVehiculo');
+  const vehs = (filterTree[juego] && filterTree[juego][circuito]) || [];
+  selVeh.innerHTML = `<option value="TODOS">Todos los vehículos</option>` + vehs.map(v => `<option value="${v}">${v}</option>`).join('');
+  selVeh.onchange = loadLeaderboard;
   loadLeaderboard();
 }
 
 async function loadLeaderboard() {
   const juego = document.getElementById('selectJuego').value;
   const circuito = document.getElementById('selectCircuito').value;
+  const vehiculo = document.getElementById('selectVehiculo').value;
   if (!juego || !circuito) return;
-  const res = await fetch(`/api/leaderboard?juego=${encodeURIComponent(juego)}&circuito=${encodeURIComponent(circuito)}`);
+  const res = await fetch(`/api/leaderboard?juego=${encodeURIComponent(juego)}&circuito=${encodeURIComponent(circuito)}&vehiculo=${encodeURIComponent(vehiculo)}`);
   const laps = await res.json();
   document.getElementById('leaderboardBody').innerHTML = laps.map((l, idx) => `
     <tr>
@@ -228,13 +242,13 @@ function drawLineChart(canvasId, title, getter, isPedals) {
   const padL = 48, padR = 16, padT = 26, padB = 18;
   const w = canvas.width - padL - padR, h = canvas.height - padT - padB;
 
-  let vals = isPedals ? new Array(0, 1) : currentSeries.flatMap(getter);
+  let vals = isPedals ? [0, 1] : currentSeries.flatMap(getter);
   let minV = Math.min(...vals), maxV = Math.max(...vals);
   if (minV === maxV) { minV -= 1; maxV += 1; }
 
   ctx.fillStyle = '#9ca3af'; ctx.font = '12px Segoe UI'; ctx.fillText(title, padL, 16);
   ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 1;
-  new Array(0, 0.5, 1).forEach(f => {
+  [0, 0.5, 1].forEach(f => {
     const y = padT + h * f;
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + w, y); ctx.stroke();
     const valLabel = (maxV - (maxV - minV) * f).toFixed(isPedals ? 1 : 2);
@@ -243,14 +257,14 @@ function drawLineChart(canvasId, title, getter, isPedals) {
 
   const plotLine = (arr, color, dashed) => {
     ctx.beginPath();
-    ctx.setLineDash(dashed ? new Array(6, 4) : new Array());
+    ctx.setLineDash(dashed ? [6, 4] : []);
     arr.forEach((v, i) => {
       const x = padL + (i / (arr.length - 1)) * w;
       const y = padT + h - ((v - minV) / (maxV - minV)) * h;
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
-    ctx.setLineDash(new Array());
+    ctx.setLineDash([]);
   };
 
   currentSeries.forEach(s => {
