@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+numpy
+google-genai
+pydantic
+psycopg2-binary

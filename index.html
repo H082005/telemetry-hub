@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Telemetry Hub & AI Race Engineer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body { background: #090d16; color: #f1f5f9; padding: 24px; }
+    .container { max-width: 1320px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 20px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }
+    .header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; border-left: 4px solid #10b981; }
+    h1 { font-size: 1.5rem; color: #10b981; display: flex; align-items: center; gap: 10px; }
+    .badge { background: rgba(16,185,129,0.15); color: #34d399; font-size: 0.75rem; padding: 3px 8px; border-radius: 6px; border: 1px solid rgba(16,185,129,0.3); }
+    .subtitle { color: #9ca3af; font-size: 0.85rem; margin-top: 4px; }
+    select, button { background: #1f2937; color: #f9fafb; border: 1px solid #374151; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; transition: 0.2s; }
+    select:hover, button:hover { border-color: #10b981; }
+    .btn-primary { background: #10b981; color: #064e3b; font-weight: 700; border: none; }
+    .btn-primary:hover { background: #34d399; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; }
+    th { text-align: left; color: #9ca3af; padding: 10px; border-bottom: 1px solid #1f2937; font-weight: 600; }
+    td { padding: 10px; border-bottom: 1px solid #1f2937; }
+    tr:hover { background: rgba(255,255,255,0.03); }
+    .mono { font-family: 'Consolas', monospace; color: #34d399; font-weight: bold; }
+    .grid-main { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+    @media (max-width: 900px) { .grid-main { grid-template-columns: 1fr; } }
+    canvas#trackCanvas { width: 100%; height: 340px; background: #070a11; border-radius: 10px; border: 1px solid #1f2937; margin-top: 12px; }
+    .ai-box { background: #070a11; border: 1px solid #1f2937; border-left: 3px solid #10b981; padding: 14px; border-radius: 8px; font-size: 0.88rem; line-height: 1.55; color: #d1d5db; white-space: pre-line; margin-top: 12px; }
+    .legend-item { display: flex; justify-content: space-between; font-size: 0.82rem; padding: 6px 0; border-bottom: 1px solid #1f2937; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+    .chart-wrap { height: 185px; margin-top: 14px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card header">
+      <div>
+        <h1>🏎️ Telemetry Hub <span class="badge">AI RACE ENGINEER</span></h1>
+        <p class="subtitle">Plataforma de análisis de telemetría multi-piloto</p>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <select id="selectJuego"></select>
+        <select id="selectCircuito"></select>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h3>Clasificación de la sesión <span style="color:#9ca3af; font-weight:400; font-size:0.85rem;">(El 1º marcado es la Referencia Base)</span></h3>
+        <button class="btn-primary" onclick="runComparison()">Comparar seleccionados</button>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Comparar</th><th>Piloto</th><th>Plataforma</th><th>Vehículo</th><th>Tiempo</th></tr>
+        </thead>
+        <tbody id="leaderboardBody"></tbody>
+      </table>
+    </div>
+
+    <div class="grid-main">
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3>Mapa Interactivo del Circuito</h3>
+          <div style="display:flex; gap:8px;">
+            <button id="btnModeDelta" class="btn-primary" onclick="setMapMode('delta')">Verde / Rojo (Delta)</button>
+            <button id="btnModeLines" onclick="setMapMode('lines')">Trazadas Pilotos</button>
+          </div>
+        </div>
+        <canvas id="trackCanvas" width="760" height="340"></canvas>
+      </div>
+
+      <div class="card" style="display:flex; flex-direction:column; justify-content:space-between;">
+        <div>
+          <h3 style="color:#10b981;">📻 Ingeniero de Pista IA</h3>
+          <div id="aiBox" class="ai-box">Cargando telemetría...</div>
+        </div>
+        <div id="legendBox" style="margin-top:16px;"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Telemetría Comparada (% de Vuelta)</h3>
+      <div class="chart-wrap"><canvas id="chartDelta"></canvas></div>
+      <div class="chart-wrap"><canvas id="chartSpeed"></canvas></div>
+      <div class="chart-wrap"><canvas id="chartPedals"></canvas></div>
+    </div>
+  </div>
+<script>
+let filtersData = {}, currentSeries = [], currentGrid = [], mapMode = 'delta', hoverIdx = null;
+
+function formatMs(ms) {
+  const m = Math.floor(ms / 60000);
+  const s = ((ms % 60000) / 1000).toFixed(3).padStart(6, '0');
+  return `${m}:${s}`;
+}
+
+async function init() {
+  const res = await fetch('/api/filters');
+  filtersData = await res.json();
+  const selJuego = document.getElementById('selectJuego');
+  selJuego.innerHTML = filtersData.juegos.map(j => `<option value="${j}">${j}</option>`).join('');
+  selJuego.onchange = updateCircuitos;
+  updateCircuitos();
+}
+
+function updateCircuitos() {
+  const juego = document.getElementById('selectJuego').value;
+  const selCirc = document.getElementById('selectCircuito');
+  const circs = filtersData.circuitos_por_juego[juego] || [];
+  selCirc.innerHTML = circs.map(c => `<option value="${c}">${c}</option>`).join('');
+  selCirc.onchange = loadLeaderboard;
+  loadLeaderboard();
+}
+
+async function loadLeaderboard() {
+  const juego = document.getElementById('selectJuego').value;
+  const circuito = document.getElementById('selectCircuito').value;
+  if (!juego || !circuito) return;
+  const res = await fetch(`/api/leaderboard?juego=${encodeURIComponent(juego)}&circuito=${encodeURIComponent(circuito)}`);
+  const laps = await res.json();
+  document.getElementById('leaderboardBody').innerHTML = laps.map((l, idx) => `
+    <tr>
+      <td><input type="checkbox" class="lap-check" style="accent-color:#10b981; width:16px; height:16px;" value="${l.id}" ${idx < 2 ? 'checked' : ''}></td>
+      <td style="font-weight:600;">${l.usuario}</td>
+      <td style="color:#9ca3af;">${l.plataforma}</td>
+      <td>${l.vehiculo}</td>
+      <td class="mono">${formatMs(l.tiempo_total_ms)}</td>
+    </tr>
+  `).join('');
+  runComparison();
+}
+
+async function runComparison() {
+  const checked = Array.from(document.querySelectorAll('.lap-check:checked')).map(cb => cb.value);
+  if (!checked.length) return;
+  const res = await fetch(`/api/compare?${checked.map(id => `ids=${id}`).join('&')}`);
+  const data = await res.json();
+  currentSeries = data.series;
+  currentGrid = data.grid;
+  document.getElementById('aiBox').textContent = data.ai_engineer;
+  document.getElementById('legendBox').innerHTML = currentSeries.map(s => `
+    <div class="legend-item">
+      <span><span class="dot" style="background:${s.color}"></span>${s.usuario} ${s.is_reference ? '(Base)' : ''}</span>
+      <span class="mono">${formatMs(s.tiempo_total_ms)}</span>
+    </div>
+  `).join('');
+  drawAll();
+}
+
+function setMapMode(mode) {
+  mapMode = mode;
+  document.getElementById('btnModeDelta').className = mode === 'delta' ? 'btn-primary' : '';
+  document.getElementById('btnModeLines').className = mode === 'lines' ? 'btn-primary' : '';
+  drawTrackMap();
+}
+
+function drawAll() {
+  drawTrackMap();
+  drawLineChart('chartDelta', 'Delta Time vs Referencia (s)', s => s.delta, false);
+  drawLineChart('chartSpeed', 'Velocidad (km/h)', s => s.speed, false);
+  drawLineChart('chartPedals', 'Pedales: Acelerador (sólido) vs Freno (discontinuo)', null, true);
+}
+
+function drawTrackMap() {
+  const canvas = document.getElementById('trackCanvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!currentSeries.length) return;
+
+  const base = currentSeries.at(0);
+  const allX = currentSeries.flatMap(s => s.x), allZ = currentSeries.flatMap(s => s.z);
+  const minX = Math.min(...allX), maxX = Math.max(...allX);
+  const minZ = Math.min(...allZ), maxZ = Math.max(...allZ);
+  const pad = 40;
+  const scale = Math.min((canvas.width - pad * 2) / (maxX - minX || 1), (canvas.height - pad * 2) / (maxZ - minZ || 1));
+  const toCanvas = (x, z) => [pad + (x - minX) * scale, pad + (z - minZ) * scale];
+
+  ctx.beginPath();
+  base.x.forEach((x, i) => {
+    const [cx, cy] = toCanvas(x, base.z.at(i));
+    i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
+  });
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 10;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  if (mapMode === 'delta' && currentSeries.length >= 2) {
+    const t = currentSeries.at(1);
+    for (let i = 0; i < t.x.length - 1; i++) {
+      const [x1, y1] = toCanvas(t.x.at(i), t.z.at(i));
+      const [x2, y2] = toCanvas(t.x.at(i + 1), t.z.at(i + 1));
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      ctx.strokeStyle = t.delta_rate.at(i) <= 0 ? '#10b981' : '#ef4444';
+      ctx.lineWidth = 5; ctx.stroke();
+    }
+  } else {
+    currentSeries.forEach(s => {
+      ctx.beginPath();
+      s.x.forEach((x, i) => { const [cx, cy] = toCanvas(x, s.z.at(i)); i === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy); });
+      ctx.strokeStyle = s.color; ctx.lineWidth = 3; ctx.stroke();
+    });
+  }
+
+  const [sx, sy] = toCanvas(base.x.at(0), base.z.at(0));
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(sx - 5, sy - 5, 10, 10);
+
+  if (hoverIdx !== null) {
+    currentSeries.forEach(s => {
+      const [cx, cy] = toCanvas(s.x.at(hoverIdx), s.z.at(hoverIdx));
+      ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      ctx.fillStyle = s.color; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    });
+  }
+}
+
+function drawLineChart(canvasId, title, getter, isPedals) {
+  const canvas = document.getElementById(canvasId);
+  canvas.width = canvas.parentElement.clientWidth;
+  canvas.height = 175;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#070a11'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!currentSeries.length) return;
+
+  const padL = 48, padR = 16, padT = 26, padB = 18;
+  const w = canvas.width - padL - padR, h = canvas.height - padT - padB;
+
+  let vals = isPedals ? new Array(0, 1) : currentSeries.flatMap(getter);
+  let minV = Math.min(...vals), maxV = Math.max(...vals);
+  if (minV === maxV) { minV -= 1; maxV += 1; }
+
+  ctx.fillStyle = '#9ca3af'; ctx.font = '12px Segoe UI'; ctx.fillText(title, padL, 16);
+  ctx.strokeStyle = '#1f2937'; ctx.lineWidth = 1;
+  new Array(0, 0.5, 1).forEach(f => {
+    const y = padT + h * f;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + w, y); ctx.stroke();
+    const valLabel = (maxV - (maxV - minV) * f).toFixed(isPedals ? 1 : 2);
+    ctx.fillStyle = '#6b7280'; ctx.fillText(valLabel, 6, y + 4);
+  });
+
+  const plotLine = (arr, color, dashed) => {
+    ctx.beginPath();
+    ctx.setLineDash(dashed ? new Array(6, 4) : new Array());
+    arr.forEach((v, i) => {
+      const x = padL + (i / (arr.length - 1)) * w;
+      const y = padT + h - ((v - minV) / (maxV - minV)) * h;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    ctx.setLineDash(new Array());
+  };
+
+  currentSeries.forEach(s => {
+    if (isPedals) {
+      plotLine(s.throttle, s.color, false);
+      plotLine(s.brake, s.color, true);
+    } else {
+      plotLine(getter(s), s.color, false);
+    }
+  });
+
+  if (hoverIdx !== null) {
+    const hx = padL + (hoverIdx / (currentGrid.length - 1)) * w;
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, padT + h); ctx.stroke();
+  }
+
+  canvas.onmousemove = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left - padL) / w));
+    hoverIdx = Math.round(ratio * (currentGrid.length - 1));
+    drawAll();
+  };
+}
+
+init();
+</script>
+</body>
+</html>
