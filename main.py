@@ -4,7 +4,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import numpy as np
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -20,6 +20,7 @@ app.add_middleware(
 )
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+ADMIN_PASS = os.getenv("ADMIN_PASS", "admin1234")
 
 def get_db():
     return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -146,6 +147,21 @@ def upload_lap(payload: LapPayload):
     cur.close()
     conn.close()
     return {"status": "ok", "lap_id": new_id}
+
+@app.delete("/api/laps/{lap_id}")
+def delete_lap(lap_id: int, x_admin_pass: Optional[str] = Header(None)):
+    if not x_admin_pass or x_admin_pass != ADMIN_PASS:
+        raise HTTPException(status_code=403, detail="Contraseña de administrador incorrecta")
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM laps WHERE id = %s RETURNING id;", (lap_id,))
+    deleted = cur.fetchone()
+    conn.commit()
+    cur.close()
+    conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Vuelta no encontrada")
+    return {"status": "deleted", "id": lap_id}
 
 @app.get("/api/filters")
 def get_filters():
