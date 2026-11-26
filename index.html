@@ -16,6 +16,8 @@
     select:hover, button:hover { border-color: #10b981; }
     .btn-primary { background: #10b981; color: #064e3b; font-weight: 700; border: none; }
     .btn-primary:hover { background: #34d399; }
+    .btn-del { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); padding: 4px 9px; font-size: 0.8rem; }
+    .btn-del:hover { background: #ef4444; color: #fff; border-color: #ef4444; }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; }
     th { text-align: left; color: #9ca3af; padding: 10px; border-bottom: 1px solid #1f2937; font-weight: 600; }
     td { padding: 10px; border-bottom: 1px solid #1f2937; }
@@ -37,10 +39,11 @@
         <h1>🏎️ Telemetry Hub <span class="badge">AI RACE ENGINEER</span></h1>
         <p class="subtitle">Plataforma de análisis de telemetría multi-piloto</p>
       </div>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
         <select id="selectJuego"></select>
         <select id="selectCircuito"></select>
         <select id="selectVehiculo"></select>
+        <button id="btnAdmin" onclick="toggleAdmin()" title="Modo Administrador">🔒 Admin</button>
       </div>
     </div>
 
@@ -51,7 +54,7 @@
       </div>
       <table>
         <thead>
-          <tr><th>Comparar</th><th>Piloto</th><th>Plataforma</th><th>Vehículo</th><th>Tiempo</th><th>Estado</th></tr>
+          <tr><th>Comparar</th><th>Piloto</th><th>Plataforma</th><th>Vehículo</th><th>Tiempo</th><th>Estado</th><th class="admin-col" style="display:none;">Borrar</th></tr>
         </thead>
         <tbody id="leaderboardBody"></tbody>
       </table>
@@ -87,6 +90,52 @@
   </div>
 <script>
 let filterTree = {}, currentSeries = [], currentGrid = [], mapMode = 'delta', hoverIdx = null;
+let adminPass = localStorage.getItem('telemetry_admin_pass') || '';
+
+function updateAdminUI() {
+  const isAdmin = Boolean(adminPass);
+  const btn = document.getElementById('btnAdmin');
+  btn.textContent = isAdmin ? '🔓 Admin Activo' : '🔒 Admin';
+  btn.style.borderColor = isAdmin ? '#10b981' : '#374151';
+  document.querySelectorAll('.admin-col').forEach(el => {
+    el.style.display = isAdmin ? '' : 'none';
+  });
+}
+
+function toggleAdmin() {
+  if (adminPass) {
+    if (confirm('¿Cerrar modo administrador en este navegador?')) {
+      adminPass = '';
+      localStorage.removeItem('telemetry_admin_pass');
+      updateAdminUI();
+    }
+    return;
+  }
+  const pass = prompt('Introduce tu contraseña de administrador:');
+  if (pass) {
+    adminPass = pass.trim();
+    localStorage.setItem('telemetry_admin_pass', adminPass);
+    updateAdminUI();
+  }
+}
+
+async function deleteLap(id) {
+  if (!confirm('¿Seguro que quieres borrar esta vuelta definitivamente?')) return;
+  const res = await fetch(`/api/laps/${id}`, {
+    method: 'DELETE',
+    headers: { 'X-Admin-Pass': adminPass }
+  });
+  if (res.status === 403) {
+    alert('❌ Contraseña de administrador incorrecta.');
+    adminPass = '';
+    localStorage.removeItem('telemetry_admin_pass');
+    updateAdminUI();
+    return;
+  }
+  if (res.ok) {
+    await init();
+  }
+}
 
 function formatMs(ms) {
   const m = Math.floor(ms / 60000);
@@ -95,21 +144,26 @@ function formatMs(ms) {
 }
 
 async function init() {
+  updateAdminUI();
+  const prevJuego = document.getElementById('selectJuego').value;
+  const prevCirc = document.getElementById('selectCircuito').value;
   const res = await fetch('/api/filters');
   const data = await res.json();
   filterTree = data.tree || {};
   const selJuego = document.getElementById('selectJuego');
   const juegos = Object.keys(filterTree);
   selJuego.innerHTML = juegos.map(j => `<option value="${j}">${j}</option>`).join('');
+  if (prevJuego && juegos.includes(prevJuego)) selJuego.value = prevJuego;
   selJuego.onchange = updateCircuitos;
-  updateCircuitos();
+  updateCircuitos(prevCirc);
 }
 
-function updateCircuitos() {
+function updateCircuitos(preferredCirc) {
   const juego = document.getElementById('selectJuego').value;
   const selCirc = document.getElementById('selectCircuito');
   const circs = Object.keys(filterTree[juego] || {});
   selCirc.innerHTML = circs.map(c => `<option value="${c}">${c}</option>`).join('');
+  if (typeof preferredCirc === 'string' && circs.includes(preferredCirc)) selCirc.value = preferredCirc;
   selCirc.onchange = updateVehiculos;
   updateVehiculos();
 }
@@ -131,6 +185,7 @@ async function loadLeaderboard() {
   if (!juego || !circuito) return;
   const res = await fetch(`/api/leaderboard?juego=${encodeURIComponent(juego)}&circuito=${encodeURIComponent(circuito)}&vehiculo=${encodeURIComponent(vehiculo)}`);
   const laps = await res.json();
+  const isAdmin = Boolean(adminPass);
   document.getElementById('leaderboardBody').innerHTML = laps.map((l, idx) => `
     <tr>
       <td><input type="checkbox" class="lap-check" style="accent-color:#10b981; width:16px; height:16px;" value="${l.id}" ${idx < 2 ? 'checked' : ''}></td>
@@ -139,11 +194,11 @@ async function loadLeaderboard() {
       <td>${l.vehiculo}</td>
       <td class="mono">${formatMs(l.tiempo_total_ms)}</td>
       <td>${l.valida ? '<span style="color:#10b981; font-weight:600;">(Vuelta Válida)</span>' : '<span style="color:#ef4444; font-weight:600;">(Vuelta Inválida)</span>'}</td>
+      <td class="admin-col" style="display:${isAdmin ? '' : 'none'};"><button class="btn-del" onclick="deleteLap(${l.id})">🗑️</button></td>
     </tr>
   `).join('');
   runComparison();
 }
-
 async function runComparison() {
   const checked = Array.from(document.querySelectorAll('.lap-check:checked')).map(cb => cb.value);
   if (!checked.length) return;
